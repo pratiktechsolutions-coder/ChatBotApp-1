@@ -1,0 +1,21 @@
+{
+  "name": "chatbot-app-server",
+  "version": "1.0.0",
+  "description": "Express and Socket.io server for real-time chatbot application",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "chatbot-app-root": "file:..",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.7.5",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

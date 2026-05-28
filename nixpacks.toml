@@ -1,0 +1,13 @@
+# Railway build configuration
+# Build: install all deps, then compile the React client into client/dist
+# Start: run the Node server which serves both the API and the built React app
+
+[phases.build]
+cmds = [
+  "npm install",
+  "npm install --prefix client",
+  "npm run build --prefix client"
+]
+
+[start]
+cmd = "node server/index.js"
