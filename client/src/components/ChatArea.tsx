@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Socket } from 'socket.io-client';
-import { Send, Paperclip, X, ArrowLeft, Image as ImageIcon, Smile, MessageSquare } from 'lucide-react';
+import { Send, Paperclip, X, ArrowLeft, Image as ImageIcon, Smile, MessageSquare, Trash2 } from 'lucide-react';
 import { ChatUser, ChatRoom, ChatMessage, SERVER_URL, getAvatarFallback } from '../App';
 
 interface ChatAreaProps {
@@ -32,6 +32,24 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleDeleteChat = async () => {
+    if (!activeChat) return;
+    if (!window.confirm("Are you sure you want to permanently delete this chat? This will delete all messages in this conversation.")) return;
+    
+    try {
+      const response = await fetch(`${SERVER_URL}/api/rooms/${activeChat.id}`, {
+        method: 'DELETE'
+      });
+      
+      if (!response.ok) {
+        alert("Failed to delete chat room.");
+      }
+    } catch (err) {
+      console.error('Error deleting chat:', err);
+      alert("Error deleting chat.");
+    }
+  };
 
   // Fetch messages when active chat changes
   useEffect(() => {
@@ -230,7 +248,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
     return (
       <div className="chat-window-empty">
         <MessageSquare size={80} style={{ opacity: 0.15, background: 'var(--accent-gradient)', padding: '16px', borderRadius: '24px', color: 'white' }} />
-        <div className="empty-logo">Welcome to Kapse Chat</div>
+        <div className="empty-logo">Welcome to TalkSpace</div>
         <p className="empty-text">Select a user or join a group chat from the sidebar panel to begin your real-time conversations.</p>
       </div>
     );
@@ -260,6 +278,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 : '1-1 Conversation'}
             </span>
           </div>
+        </div>
+        
+        <div className="chat-header-right">
+          <button 
+            onClick={handleDeleteChat} 
+            className="icon-btn" 
+            title="Delete Chat"
+            style={{ color: '#ef4444' }}
+          >
+            <Trash2 size={20} />
+          </button>
         </div>
       </div>
 

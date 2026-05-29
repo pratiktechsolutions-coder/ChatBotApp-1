@@ -85,12 +85,104 @@ app.post('/api/auth', (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// Register User
+app.post('/api/auth/register', (req, res) => {
+  const { firstName, lastName, email, password, avatar } = req.body;
+  if (!firstName || !lastName || !email || !password) {
+    return res.status(400).json({ error: 'All fields (First name, Last name, Email, and Password) are required' });
+  }
 
+  try {
+    const user = Users.register(firstName.trim(), lastName.trim(), email.trim(), password, avatar);
+    
+    // Broadcast user status changed to notify other online users of new registration
+    io.emit('user_status_changed', { userId: user.id, isOnline: true });
+    
+    res.status(200).json(user);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Login User
+app.post('/api/auth/login', (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  try {
+    const user = Users.authenticate(email.trim(), password);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Broadcast user online status
+    io.emit('user_status_changed', { userId: user.id, isOnline: true });
+
+    res.status(200).json(user);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 // Fetch all registered users
 app.get('/api/users', (req, res) => {
   try {
     const list = Users.getAll();
     res.status(200).json(list);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add Friend
+app.post('/api/users/friend', (req, res) => {
+  const { userId, friendId } = req.body;
+  if (!userId || !friendId) {
+    return res.status(400).json({ error: 'Both userId and friendId are required' });
+  }
+  try {
+    const user = Users.addFriend(userId, friendId);
+    if (!user) return res.status(404).json({ error: 'User or friend not found' });
+    
+    // Broadcast user status changed to trigger UI reload for friends list
+    io.emit('user_status_changed', { userId, isOnline: true });
+    
+    res.status(200).json(user);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete user account
+app.delete('/api/users/:userId', (req, res) => {
+  const { userId } = req.params;
+  try {
+    const success = Users.delete(userId);
+    if (!success) return res.status(404).json({ error: 'User not found' });
+    
+    // Notify all active clients that this user is deleted and rooms they were in are updated
+    io.emit('user_deleted', userId);
+    io.emit('chat_list_refresh');
+    
+    res.status(200).json({ success: true, message: 'User account deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete chat room
+app.delete('/api/rooms/:roomId', (req, res) => {
+  const { roomId } = req.params;
+  try {
+    const success = Rooms.delete(roomId);
+    if (!success) return res.status(404).json({ error: 'Room not found' });
+    
+    // Notify all clients in that room or generally that the room is gone
+    io.emit('room_deleted', roomId);
+    io.emit('chat_list_refresh');
+    
+    res.status(200).json({ success: true, message: 'Chat room deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

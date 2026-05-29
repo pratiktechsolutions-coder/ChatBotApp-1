@@ -106,7 +106,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             <input 
               type="text" 
               className="form-input" 
-              placeholder="e.g. kapse-code"
+              placeholder="e.g. group-avatar"
               value={groupAvatar}
               onChange={(e) => setGroupAvatar(e.target.value ? `https://api.dicebear.com/7.x/identicon/svg?seed=${e.target.value}` : '')}
             />

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { User, MessageSquare, Image, Bell, Shuffle, LogIn } from 'lucide-react';
+import { User, MessageSquare, Image, Bell, Shuffle, LogIn, Mail, Lock } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import QuickReplyPopup from './components/QuickReplyPopup';
@@ -18,6 +18,7 @@ export interface ChatUser {
   avatar: string;
   isOnline: boolean;
   lastSeen: string;
+  friends?: string[];
 }
 
 export interface ChatMessage {
@@ -76,7 +77,12 @@ export const getAvatarFallback = (name: string) => {
 
 function App() {
   const [currentUser, setCurrentUser] = useState<ChatUser | null>(null);
-  const [usernameInput, setUsernameInput] = useState('');
+  const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [firstNameInput, setFirstNameInput] = useState('');
+  const [lastNameInput, setLastNameInput] = useState('');
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [avatarInput, setAvatarInput] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   
@@ -85,6 +91,16 @@ function App() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [allUsers, setAllUsers] = useState<ChatUser[]>([]);
   const socketRef = useRef<Socket | null>(null);
+  const currentUserRef = useRef<ChatUser | null>(null);
+  const activeChatIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
 
   // Quick Reply WhatsApp-style Notification state
   const [toastAlert, setToastAlert] = useState<MessageAlert | null>(null);
@@ -105,43 +121,81 @@ function App() {
   };
 
   useEffect(() => {
-    if (!avatarInput && usernameInput) {
-      setAvatarInput(`https://api.dicebear.com/7.x/adventurer/svg?seed=${usernameInput}`);
+    if (!avatarInput && (firstNameInput || lastNameInput)) {
+      setAvatarInput(`https://api.dicebear.com/7.x/adventurer/svg?seed=${firstNameInput}_${lastNameInput}`);
     }
-  }, [usernameInput]);
+  }, [firstNameInput, lastNameInput]);
 
-  // Authenticate user
-  const handleLogin = async (e: React.FormEvent) => {
+  // Authenticate user (unified register & login handler)
+  const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!usernameInput.trim()) return;
 
-    setIsLoggingIn(true);
-    try {
-      const response = await fetch(`${SERVER_URL}/api/auth`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: usernameInput.trim(),
-          avatar: avatarInput || undefined
-        })
-      });
+    if (isRegisterMode) {
+      if (!firstNameInput.trim() || !lastNameInput.trim() || !emailInput.trim() || !passwordInput) {
+        alert("All fields are required for registration.");
+        return;
+      }
+      if (passwordInput !== confirmPasswordInput) {
+        alert("Passwords do not match!");
+        return;
+      }
 
-      if (!response.ok) throw new Error('Authentication failed');
-      const data: ChatUser = await response.json();
-      
-      setCurrentUser(data);
-      localStorage.setItem('kapse_chat_user', JSON.stringify(data));
-    } catch (err) {
-      console.error('Login error:', err);
-      alert('Could not connect to Chat Server. Make sure the server backend is running!');
-    } finally {
-      setIsLoggingIn(false);
+      setIsLoggingIn(true);
+      try {
+        const response = await fetch(`${SERVER_URL}/api/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            firstName: firstNameInput.trim(),
+            lastName: lastNameInput.trim(),
+            email: emailInput.trim(),
+            password: passwordInput,
+            avatar: avatarInput || undefined
+          })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Registration failed');
+
+        setCurrentUser(data);
+        localStorage.setItem('talkspace_chat_user', JSON.stringify(data));
+      } catch (err: any) {
+        console.error('Registration error:', err);
+        alert(err.message || 'Registration failed. Please try again!');
+      } finally {
+        setIsLoggingIn(false);
+      }
+    } else {
+      if (!emailInput.trim() || !passwordInput) return;
+
+      setIsLoggingIn(true);
+      try {
+        const response = await fetch(`${SERVER_URL}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: emailInput.trim(),
+            password: passwordInput
+          })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Authentication failed');
+
+        setCurrentUser(data);
+        localStorage.setItem('talkspace_chat_user', JSON.stringify(data));
+      } catch (err: any) {
+        console.error('Login error:', err);
+        alert(err.message || 'Login failed. Please verify your credentials and try again!');
+      } finally {
+        setIsLoggingIn(false);
+      }
     }
   };
 
   // Check persistent login on load
   useEffect(() => {
-    const stored = localStorage.getItem('kapse_chat_user');
+    const stored = localStorage.getItem('talkspace_chat_user');
     if (stored) {
       setCurrentUser(JSON.parse(stored));
     }
@@ -171,9 +225,25 @@ function App() {
       fetchChats();
     });
 
+    socket.on('user_deleted', (deletedUserId: string) => {
+      if (currentUserRef.current && currentUserRef.current.id === deletedUserId) {
+        handleLogout();
+      } else {
+        fetchUsers();
+        fetchChats();
+      }
+    });
+
+    socket.on('room_deleted', (deletedRoomId: string) => {
+      if (activeChatIdRef.current === deletedRoomId) {
+        setActiveChatId(null);
+      }
+      fetchChats();
+    });
+
     socket.on('new_message', (msg: ChatMessage) => {
       // Mark as read if the active chat window is already opened on this chat
-      if (activeChatId === msg.roomId) {
+      if (activeChatIdRef.current === msg.roomId) {
         markAsRead(msg.roomId);
       }
       fetchChats();
@@ -184,7 +254,7 @@ function App() {
       // Trigger native browser notification if app is in background/unfocused
       if (document.hidden) {
         showNativeNotification(alertData);
-      } else if (activeChatId !== alertData.roomId) {
+      } else if (activeChatIdRef.current !== alertData.roomId) {
         // App is focused, but user is NOT currently inside the sender's active chat
         setToastAlert(alertData);
         
@@ -201,7 +271,7 @@ function App() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [currentUser, activeChatId]);
+  }, [currentUser?.id]);
 
   // Request browser notification
   const showNativeNotification = (alertData: MessageAlert) => {
@@ -241,9 +311,38 @@ function App() {
       if (res.ok) {
         const list = await res.json();
         setAllUsers(list);
+        
+        // Also update currentUser friends list if they have updated in list
+        const stored = localStorage.getItem('talkspace_chat_user');
+        if (stored) {
+          const storedUser = JSON.parse(stored);
+          const updatedSelf = list.find((u: ChatUser) => u.id === storedUser.id);
+          if (updatedSelf) {
+            setCurrentUser(prev => prev ? { ...prev, friends: updatedSelf.friends || [] } : null);
+          }
+        }
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleAddFriend = async (friendId: string) => {
+    if (!currentUser) return;
+    try {
+      const response = await fetch(`${SERVER_URL}/api/users/friend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          friendId
+        })
+      });
+      if (response.ok) {
+        await fetchUsers();
+      }
+    } catch (err) {
+      console.error('Error adding friend:', err);
     }
   };
 
@@ -272,10 +371,29 @@ function App() {
     if (socketRef.current) {
       socketRef.current.disconnect();
     }
-    localStorage.removeItem('kapse_chat_user');
+    localStorage.removeItem('talkspace_chat_user');
     setCurrentUser(null);
     setActiveChatId(null);
     setChats([]);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!currentUser) return;
+    if (!window.confirm("Are you sure you want to permanently delete your account? This action cannot be undone.")) return;
+    
+    try {
+      const response = await fetch(`${SERVER_URL}/api/users/${currentUser.id}`, {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        handleLogout();
+      } else {
+        alert("Failed to delete account.");
+      }
+    } catch (err) {
+      console.error('Error deleting account:', err);
+      alert("Error deleting account.");
+    }
   };
 
   // Toggle quick-reply overlay from toast banner click
@@ -291,41 +409,150 @@ function App() {
   if (!currentUser) {
     return (
       <div className="auth-wrapper">
-        <div className="auth-card">
-          <div className="auth-logo">Kapse Chat</div>
-          <div className="auth-tagline">Real-Time Messaging & Groups</div>
+        <div className="auth-card" style={{ maxWidth: isRegisterMode ? '480px' : '400px' }}>
+          <div className="auth-logo">TalkSpace</div>
+          <div className="auth-tagline">
+            {isRegisterMode ? 'Create a new account' : 'Real-Time Messaging & Groups'}
+          </div>
           
-          <form onSubmit={handleLogin}>
-            <div className="avatar-preview-section">
-              <img 
-                src={avatarInput || 'https://api.dicebear.com/7.x/adventurer/svg?seed=welcome'} 
-                alt="Avatar Preview" 
-                className="avatar-large"
-                onError={(e) => { e.currentTarget.src = getAvatarFallback(usernameInput || 'Guest'); }}
-              />
-              <button 
-                type="button" 
-                onClick={shuffleAvatar} 
-                className="avatar-shuffle-btn"
-              >
-                <Shuffle size={14} /> Shuffle Avatar
-              </button>
-            </div>
+          <form onSubmit={handleAuthSubmit}>
+            <div style={{ 
+              maxHeight: isRegisterMode ? '320px' : 'none', 
+              overflowY: isRegisterMode ? 'auto' : 'visible', 
+              paddingRight: isRegisterMode ? '8px' : '0px',
+              marginBottom: '20px'
+            }}>
+              {isRegisterMode && (
+                <div className="avatar-preview-section">
+                  <img 
+                    src={avatarInput || 'https://api.dicebear.com/7.x/adventurer/svg?seed=welcome'} 
+                    alt="Avatar Preview" 
+                    className="avatar-large"
+                    onError={(e) => { e.currentTarget.src = getAvatarFallback(firstNameInput || 'Guest'); }}
+                  />
+                  <button 
+                    type="button" 
+                    onClick={shuffleAvatar} 
+                    className="avatar-shuffle-btn"
+                  >
+                    <Shuffle size={14} /> Shuffle Avatar
+                  </button>
+                </div>
+              )}
 
-            <div className="auth-form-group">
-              <label className="auth-label">Enter Username</label>
-              <div className="auth-input-wrapper">
-                <LogIn className="auth-input-icon" size={18} />
-                <input 
-                  type="text" 
-                  className="auth-input" 
-                  placeholder="e.g. Alex_Kapse"
-                  value={usernameInput}
-                  onChange={(e) => setUsernameInput(e.target.value)}
-                  maxLength={18}
-                  required
-                />
-              </div>
+              {isRegisterMode ? (
+                <>
+                  <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+                    <div className="auth-form-group" style={{ flex: 1, marginBottom: 0 }}>
+                      <label className="auth-label">First Name</label>
+                      <div className="auth-input-wrapper">
+                        <User className="auth-input-icon" size={18} />
+                        <input 
+                          type="text" 
+                          className="auth-input" 
+                          placeholder="Alex"
+                          value={firstNameInput}
+                          onChange={(e) => setFirstNameInput(e.target.value)}
+                          maxLength={14}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="auth-form-group" style={{ flex: 1, marginBottom: 0 }}>
+                      <label className="auth-label">Last Name</label>
+                      <div className="auth-input-wrapper">
+                        <User className="auth-input-icon" size={18} />
+                        <input 
+                          type="text" 
+                          className="auth-input" 
+                          placeholder="Smith"
+                          value={lastNameInput}
+                          onChange={(e) => setLastNameInput(e.target.value)}
+                          maxLength={14}
+                          required
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="auth-form-group" style={{ marginBottom: '16px' }}>
+                    <label className="auth-label">Email Address</label>
+                    <div className="auth-input-wrapper">
+                      <Mail className="auth-input-icon" size={18} />
+                      <input 
+                        type="email" 
+                        className="auth-input" 
+                        placeholder="alex.smith@example.com"
+                        value={emailInput}
+                        onChange={(e) => setEmailInput(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="auth-form-group" style={{ marginBottom: '16px' }}>
+                    <label className="auth-label">Password</label>
+                    <div className="auth-input-wrapper">
+                      <Lock className="auth-input-icon" size={18} />
+                      <input 
+                        type="password" 
+                        className="auth-input" 
+                        placeholder="Min 6 characters"
+                        value={passwordInput}
+                        onChange={(e) => setPasswordInput(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="auth-form-group" style={{ marginBottom: '12px' }}>
+                    <label className="auth-label">Confirm Password</label>
+                    <div className="auth-input-wrapper">
+                      <Lock className="auth-input-icon" size={18} />
+                      <input 
+                        type="password" 
+                        className="auth-input" 
+                        placeholder="Repeat password"
+                        value={confirmPasswordInput}
+                        onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="auth-form-group" style={{ marginBottom: '16px' }}>
+                    <label className="auth-label">Email Address</label>
+                    <div className="auth-input-wrapper">
+                      <Mail className="auth-input-icon" size={18} />
+                      <input 
+                        type="email" 
+                        className="auth-input" 
+                        placeholder="alex.smith@example.com"
+                        value={emailInput}
+                        onChange={(e) => setEmailInput(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="auth-form-group" style={{ marginBottom: '24px' }}>
+                    <label className="auth-label">Password</label>
+                    <div className="auth-input-wrapper">
+                      <Lock className="auth-input-icon" size={18} />
+                      <input 
+                        type="password" 
+                        className="auth-input" 
+                        placeholder="Enter your password"
+                        value={passwordInput}
+                        onChange={(e) => setPasswordInput(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
             <button 
@@ -333,9 +560,35 @@ function App() {
               className="auth-submit-btn"
               disabled={isLoggingIn}
             >
-              {isLoggingIn ? 'Connecting...' : 'Join Chatroom'}
+              {isLoggingIn 
+                ? (isRegisterMode ? 'Creating Account...' : 'Signing In...') 
+                : (isRegisterMode ? 'Sign Up' : 'Sign In')}
             </button>
           </form>
+
+          <div style={{ marginTop: '20px', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+            {isRegisterMode ? (
+              <>
+                Already have an account?{' '}
+                <span 
+                  onClick={() => setIsRegisterMode(false)} 
+                  style={{ color: 'var(--accent-light)', cursor: 'pointer', fontWeight: 600, textDecoration: 'underline' }}
+                >
+                  Sign In
+                </span>
+              </>
+            ) : (
+              <>
+                Don't have an account?{' '}
+                <span 
+                  onClick={() => setIsRegisterMode(true)} 
+                  style={{ color: 'var(--accent-light)', cursor: 'pointer', fontWeight: 600, textDecoration: 'underline' }}
+                >
+                  Sign Up
+                </span>
+              </>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -359,6 +612,8 @@ function App() {
           fetchChats();
           selectChat(newRoomId);
         }}
+        onAddFriend={handleAddFriend}
+        onDeleteAccount={handleDeleteAccount}
       />
 
       {/* Chat Area: Main Panel */}

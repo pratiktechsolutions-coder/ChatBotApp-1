@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Socket } from 'socket.io-client';
-import { Search, Users, LogOut, Plus, MessageSquare, ShieldAlert } from 'lucide-react';
+import { Search, Users, LogOut, Plus, MessageSquare, ShieldAlert, Trash2 } from 'lucide-react';
 import { ChatUser, ChatRoom, SERVER_URL, getAvatarFallback } from '../App';
 import CreateGroupModal from './CreateGroupModal';
 
@@ -13,6 +13,8 @@ interface SidebarProps {
   onLogout: () => void;
   socket: Socket | null;
   onRoomCreated: (newRoomId: string) => void;
+  onAddFriend: (friendId: string) => void;
+  onDeleteAccount: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -23,7 +25,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   onSelectChat,
   onLogout,
   socket,
-  onRoomCreated
+  onRoomCreated,
+  onAddFriend,
+  onDeleteAccount
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
@@ -43,10 +47,19 @@ const Sidebar: React.FC<SidebarProps> = ({
       c.type === 'direct' && c.members.includes(contact.id)
     );
     
+    if (hasDirectChat) return false;
+
     // Check if username matches search query
     const matchesSearch = contact.username.toLowerCase().includes(searchQuery.toLowerCase());
     
-    return !hasDirectChat && matchesSearch;
+    if (searchQuery.trim() === '') {
+      // If no query, only show users who are already friends
+      const isFriend = currentUser.friends?.includes(contact.id);
+      return isFriend;
+    } else {
+      // If searching, show any user matching search query
+      return matchesSearch;
+    }
   });
 
   // Handle clicking a contact to start/open direct chat
@@ -118,6 +131,14 @@ const Sidebar: React.FC<SidebarProps> = ({
             title="Log Out"
           >
             <LogOut size={18} />
+          </button>
+          <button 
+            onClick={onDeleteAccount} 
+            className="icon-btn" 
+            title="Delete Account"
+            style={{ color: '#ef4444' }}
+          >
+            <Trash2 size={18} />
           </button>
         </div>
       </div>
@@ -198,34 +219,51 @@ const Sidebar: React.FC<SidebarProps> = ({
         {filteredContacts.length > 0 && (
           <div>
             <div className="list-section-title">Start a Chat</div>
-            {filteredContacts.map(contact => (
-              <div 
-                key={contact.id}
-                className="chat-item"
-                onClick={() => handleContactClick(contact)}
-              >
-                <div className="chat-avatar-wrapper">
-                  <img 
-                    src={contact.avatar} 
-                    alt={contact.username} 
-                    className="avatar-small" 
-                    onError={(e) => { e.currentTarget.src = getAvatarFallback(contact.username); }}
-                  />
-                  <span className={`status-badge ${contact.isOnline ? 'online' : 'offline'}`}></span>
-                </div>
-                
-                <div className="chat-item-details">
-                  <div className="chat-item-row">
-                    <span className="chat-item-name">{contact.username}</span>
+            {filteredContacts.map(contact => {
+              const isFriend = currentUser.friends?.includes(contact.id);
+              return (
+                <div 
+                  key={contact.id}
+                  className="chat-item"
+                  onClick={() => handleContactClick(contact)}
+                >
+                  <div className="chat-avatar-wrapper">
+                    <img 
+                      src={contact.avatar} 
+                      alt={contact.username} 
+                      className="avatar-small" 
+                      onError={(e) => { e.currentTarget.src = getAvatarFallback(contact.username); }}
+                    />
+                    <span className={`status-badge ${contact.isOnline ? 'online' : 'offline'}`}></span>
                   </div>
-                  <div className="chat-item-msg-row">
-                    <span className="chat-item-lastmsg" style={{ color: 'var(--text-muted)' }}>
-                      Click to send direct message
-                    </span>
+                  
+                  <div className="chat-item-details" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: '8px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="chat-item-row">
+                        <span className="chat-item-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{contact.username}</span>
+                      </div>
+                      <div className="chat-item-msg-row">
+                        <span className="chat-item-lastmsg" style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {isFriend ? 'Friend • Click to message' : 'Not in friends list'}
+                        </span>
+                      </div>
+                    </div>
+                    {!isFriend && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAddFriend(contact.id);
+                        }}
+                        className="btn-primary"
+                        style={{ padding: '6px 10px', fontSize: '0.75rem', borderRadius: '6px', whiteSpace: 'nowrap', background: 'var(--accent-gradient)', border: 'none', color: 'white', cursor: 'pointer' }}
+                      >
+                        Add Friend
+                      </button>
+                    )}
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
